@@ -3,6 +3,8 @@ name: Daily News Push
 on:
   schedule:
     - cron: 0 1 * * *
+    - cron: 0 9 * * *
+    - cron: 0 17 * * *
   workflow_dispatch:
     inputs:
       topic:
