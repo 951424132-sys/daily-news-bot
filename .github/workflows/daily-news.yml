@@ -1,34 +1,26 @@
 name: Daily News Push
 
 on:
-  schedule:
-    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       topic:
-        description: '新闻主题'
+        description: News topic
         required: false
-        default: '人工智能 AI technology'
-
-permissions:
-  contents: read
+        default: 人工智能 AI technology
 
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
-
+          python-version: "3.9"
       - name: Install dependencies
         run: pip install requests feedparser
-
       - name: Run news bot
         env:
-          TOPIC: ${{ inputs.topic }}
+          TOPIC: ${{ github.event.inputs.topic || '人工智能 AI technology' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
         run: |
           python3 - <<'PY'
@@ -36,24 +28,33 @@ jobs:
           from datetime import datetime
 
           TOPIC = os.environ.get('TOPIC', '人工智能 AI technology')
-          WEBHOOK = os.environ.get('WECOM_WEBHOOK_URL', '').strip()
+          WEBHOOK = os.environ.get('WECOM_WEBHOOK_URL', '')
+
+          print(f"TOPIC: {TOPIC}")
+          print(f"WEBHOOK exists: {bool(WEBHOOK)}")
 
           url = f"https://news.google.com/rss/search?q={urllib.parse.quote(TOPIC)}+when:1d&hl=zh-CN"
           feed = feedparser.parse(url)
-
           items = []
+
           for e in feed.entries[:10]:
-            t = e.title.split(' - ')[0] if ' - ' in e.title else e.title
-            items.append({'title': t, 'link': e.link})
+              t = e.title.split(' - ')[0] if ' - ' in e.title else e.title
+              items.append({'title': t, 'link': e.link})
 
           date = datetime.now().strftime('%Y年%m月%d日')
           msg = f"## ☀ 早安！今日资讯简报\n\n**📅 日期**:{date}\n**📌 主题**:{TOPIC}\n\n"
+
           for i, item in enumerate(items, 1):
-            msg += f"**{i}.** [{item['title']}]({item['link']})\n"
+              msg += f"**{i}.** [{item['title']}]({item['link']})\n"
           msg += "\n---\n💡 *祝您今天工作顺利！*"
 
+          print(f"Items fetched: {len(items)}")
+
           if WEBHOOK:
-            requests.post(WEBHOOK, json={'msgtype': 'markdown', 'markdown': {'content': msg}}, timeout=10)
+              print("Sending to WeChat...")
+              r = requests.post(WEBHOOK, json={'msgtype': 'markdown', 'markdown': {'content': msg}}, timeout=10)
+              print(f"Status: {r.status_code}")
+              print(f"Response: {r.text}")
           else:
-            print(msg)
+              print("ERROR: WECOM_WEBHOOK_URL is empty!")
           PY
