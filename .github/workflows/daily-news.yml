@@ -1,13 +1,12 @@
+---
 name: Daily News Push
-
 on:
   workflow_dispatch:
     inputs:
       topic:
         description: News topic
         required: false
-        default: 人工智能 AI technology
-
+        default: AI
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
@@ -20,35 +19,49 @@ jobs:
         run: pip install requests feedparser
       - name: Run news bot
         env:
-          TOPIC: ${{ github.event.inputs.topic || '人工智能 AI technology' }}
+          TOPIC: ${{ github.event.inputs.topic || 'AI' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
-        run: |
+        run: >
           python3 - <<'PY'
+
           import os, urllib.parse, requests, feedparser
+
           from datetime import datetime
 
-          TOPIC = os.environ.get('TOPIC', '人工智能 AI technology')
+
+          TOPIC = os.environ.get('TOPIC', 'AI')
+
           WEBHOOK = os.environ.get('WECOM_WEBHOOK_URL', '')
 
+
           print(f"TOPIC: {TOPIC}")
+
           print(f"WEBHOOK exists: {bool(WEBHOOK)}")
 
+
           url = f"https://news.google.com/rss/search?q={urllib.parse.quote(TOPIC)}+when:1d&hl=zh-CN"
+
           feed = feedparser.parse(url)
+
           items = []
+
 
           for e in feed.entries[:10]:
               t = e.title.split(' - ')[0] if ' - ' in e.title else e.title
               items.append({'title': t, 'link': e.link})
 
           date = datetime.now().strftime('%Y年%m月%d日')
+
           msg = f"## ☀ 早安！今日资讯简报\n\n**📅 日期**:{date}\n**📌 主题**:{TOPIC}\n\n"
+
 
           for i, item in enumerate(items, 1):
               msg += f"**{i}.** [{item['title']}]({item['link']})\n"
           msg += "\n---\n💡 *祝您今天工作顺利！*"
 
+
           print(f"Items fetched: {len(items)}")
+
 
           if WEBHOOK:
               print("Sending to WeChat...")
