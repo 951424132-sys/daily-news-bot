@@ -1,6 +1,10 @@
 ---
 name: Daily News Push
 on:
+  schedule:
+    - cron: '0 1 * * *'   # UTC 1:00 = 中国9:00（主）
+    - cron: '0 9 * * *'   # UTC 9:00 = 中国17:00（备1）
+    - cron: '0 17 * * *'  # UTC 17:00 = 次日凌晨1:00（备2)
   workflow_dispatch:
     inputs:
       topic:
