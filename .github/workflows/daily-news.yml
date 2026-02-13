@@ -1,15 +1,18 @@
----
 name: Daily News Push
+
 on:
   workflow_dispatch:
     inputs:
       topic:
         description: News topic
         required: false
-        default: AI
+        default: 科技
+
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -19,59 +22,52 @@ jobs:
         run: pip install requests feedparser
       - name: Run news bot
         env:
-          TOPIC: ${{ github.event.inputs.topic || 'AI' }}
+          TOPIC: ${{ github.event.inputs.topic || '科技' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
-        run: >
+          WECOM_WEBHOOK_URL1: ${{ secrets.WECOM_WEBHOOK_URL1 }}
+          WECOM_WEBHOOK_URL2: ${{ secrets.WECOM_WEBHOOK_URL2 }}
+        run: |
           python3 - <<'PY'
-
           import os, urllib.parse, requests, feedparser
-
           from datetime import datetime
 
-
-          TOPIC = os.environ.get('TOPIC', 'AI')
-
+          TOPIC = os.environ.get('TOPIC', '科技')
           WEBHOOK_URLS = [
-            os.environ.get('WECOM_WEBHOOK_URL', ''),
-            os.environ.get('WECOM_WEBHOOK_URL1', ''),
-            os.environ.get('WECOM_WEBHOOK_URL2', '')]
-          WEBHOOK_URLS = [url for url in WEBHOOK_URLS if url]  # 过滤空值
-
+              os.environ.get('WECOM_WEBHOOK_URL', ''),
+              os.environ.get('WECOM_WEBHOOK_URL1', ''),
+              os.environ.get('WECOM_WEBHOOK_URL2', '')
+          ]
+          WEBHOOK_URLS = [url for url in WEBHOOK_URLS if url]
 
           print(f"TOPIC: {TOPIC}")
-
-          print(f"WEBHOOK exists: {bool(WEBHOOK)}")
-
+          print(f"Webhooks found: {len(WEBHOOK_URLS)}")
 
           url = f"https://news.google.com/rss/search?q={urllib.parse.quote(TOPIC)}+when:1d&hl=zh-CN"
-
           feed = feedparser.parse(url)
-
           items = []
-
 
           for e in feed.entries[:10]:
               t = e.title.split(' - ')[0] if ' - ' in e.title else e.title
               items.append({'title': t, 'link': e.link})
 
           date = datetime.now().strftime('%Y年%m月%d日')
-
           msg = f"## ☀ 早安！今日资讯简报\n\n**📅 日期**:{date}\n**📌 主题**:{TOPIC}\n\n"
-
 
           for i, item in enumerate(items, 1):
               msg += f"**{i}.** [{item['title']}]({item['link']})\n"
           msg += "\n---\n💡 *祝您今天工作顺利！*"
 
-
           print(f"Items fetched: {len(items)}")
 
-
-          if WEBHOOK:
-              print("Sending to WeChat...")
-              r = requests.post(WEBHOOK, json={'msgtype': 'markdown', 'markdown': {'content': msg}}, timeout=10)
-              print(f"Status: {r.status_code}")
-              print(f"Response: {r.text}")
+          if WEBHOOK_URLS:
+              for i, webhook in enumerate(WEBHOOK_URLS, 1):
+                  print(f"Sending to group {i}...")
+                  r = requests.post(webhook, json={'msgtype': 'markdown', 'markdown': {'content': msg}}, timeout=10)
+                  print(f"Group {i} - Status: {r.status_code}")
+                  if r.status_code == 200:
+                      print(f"Group {i} - Success!")
+                  else:
+                      print(f"Group {i} - Failed: {r.text}")
           else:
-              print("ERROR: WECOM_WEBHOOK_URL is empty!")
+              print("ERROR: No Webhook URLs configured!")
           PY
