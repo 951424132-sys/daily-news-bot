@@ -31,7 +31,11 @@ jobs:
 
           TOPIC = os.environ.get('TOPIC', 'AI')
 
-          WEBHOOK = os.environ.get('WECOM_WEBHOOK_URL', '')
+          WEBHOOK_URLS = [
+            os.environ.get('WECOM_WEBHOOK_URL', ''),
+            os.environ.get('WECOM_WEBHOOK_URL1', ''),
+            os.environ.get('WECOM_WEBHOOK_URL2', '')]
+          WEBHOOK_URLS = [url for url in WEBHOOK_URLS if url]  # 过滤空值
 
 
           print(f"TOPIC: {TOPIC}")
