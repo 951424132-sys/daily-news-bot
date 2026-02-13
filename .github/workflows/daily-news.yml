@@ -6,7 +6,7 @@ on:
       topic:
         description: News topic
         required: false
-        default: 科技
+        default: AI
 
 jobs:
   fetch-and-push:
@@ -22,7 +22,7 @@ jobs:
         run: pip install requests feedparser
       - name: Run news bot
         env:
-          TOPIC: ${{ github.event.inputs.topic || '科技' }}
+          TOPIC: ${{ github.event.inputs.topic || 'AI' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           WECOM_WEBHOOK_URL1: ${{ secrets.WECOM_WEBHOOK_URL1 }}
           WECOM_WEBHOOK_URL2: ${{ secrets.WECOM_WEBHOOK_URL2 }}
@@ -31,7 +31,7 @@ jobs:
           import os, urllib.parse, requests, feedparser
           from datetime import datetime
 
-          TOPIC = os.environ.get('TOPIC', '科技')
+          TOPIC = os.environ.get('TOPIC', 'AI')
           WEBHOOK_URLS = [
               os.environ.get('WECOM_WEBHOOK_URL', ''),
               os.environ.get('WECOM_WEBHOOK_URL1', ''),
