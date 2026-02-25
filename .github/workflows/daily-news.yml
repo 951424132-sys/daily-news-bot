@@ -1,77 +1,65 @@
----
 name: Daily News Push
+
 on:
   workflow_dispatch:
     inputs:
       topic:
         description: 新闻主题
         required: false
-        default: AI
+        default: 科技
+
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
+
       - name: Install dependencies
         run: pip install requests feedparser
+
       - name: Run news bot
         env:
-          TOPIC: ${{ github.event.inputs.topic || 'AI' }}
+          TOPIC: ${{ github.event.inputs.topic || '科技' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           WECOM_WEBHOOK_URL1: ${{ secrets.WECOM_WEBHOOK_URL1 }}
           WECOM_WEBHOOK_URL2: ${{ secrets.WECOM_WEBHOOK_URL2 }}
-        run: >
+        run: |
           python3 - << 'PYTHON_SCRIPT'
-
           # -*- coding: utf-8 -*-
-
           import os
-
           import urllib.parse
-
           import requests
-
           import feedparser
-
           from datetime import datetime
 
-
           # ========== 配置 ==========
-
           TOPIC = os.environ.get('TOPIC', '科技')
-
-
+          
           # 获取所有webhook地址
-
           webhook_urls = [
               os.environ.get('WECOM_WEBHOOK_URL', ''),
+              os.environ.get('WECOM_WEBHOOK_URL1', ''),
               os.environ.get('WECOM_WEBHOOK_URL2', '')
           ]
-
           webhook_urls = [url for url in webhook_urls if url.strip()]
-
-
+          
           print(f"📰 主题: {TOPIC}")
-
           print(f"📡 推送群数: {len(webhook_urls)}")
 
-
           # ========== 获取新闻 ==========
-
           news_items = []
-
           encoded_topic = urllib.parse.quote(TOPIC)
-
-
+          
           # 尝试多个RSS源
-
           rss_sources = [
               # 科技类
               f"https://news.google.com/rss/search?q={encoded_topic}&hl=zh-CN&gl=CN&ceid=CN:zh",
@@ -79,8 +67,7 @@ jobs:
               "https://tech.sina.com.cn/rss/index.xml",
               "https://www.163.com/rss/",
           ]
-
-
+          
           for source_url in rss_sources:
               if len(news_items) >= 10:
                   break
@@ -109,7 +96,6 @@ jobs:
                   continue
 
           # 如果获取太少，使用备用搜索
-
           if len(news_items) < 3:
               print("⚠️ 尝试备用方案...")
               # 尝试百度新闻
@@ -124,52 +110,29 @@ jobs:
 
           print(f"✅ 获取到 {len(news_items)} 条新闻")
 
-
           # ========== 构建消息 ==========
-
           date_str = datetime.now().strftime('%Y年%m月%d日')
-
-
+          
           # 消息头部
-
-          msg = f"""## ☀ 早安！今日资讯简报
-
-
-          **📅 日期**: {date_str}
-
-          **📌 主题**: {TOPIC}
-
-
-          ---
-
-
-          """
-
-
-          # 每条新闻（优化移动端链接格式）
-
+          msg = f"## ☀ 早安！今日资讯简报\n\n"
+          msg += f"**📅 日期**: {date_str}\n"
+          msg += f"**📌 主题**: {TOPIC}\n\n"
+          msg += "---\n\n"
+          
+          # 每条新闻（隐藏网址，仅显示标题超链接）
           for i, item in enumerate(news_items[:10], 1):
-              # 标题
-              msg += f"**{i}.** {item['title']}\n"
-              # 链接 - 使用可点击格式
-              msg += f"   🔗 链接: {item['link']}\n\n"
+              # 格式为: 1. [新闻标题](新闻链接)
+              msg += f"{i}. [{item['title']}]({item['link']})\n\n"
 
           # 消息尾部
-
-          msg += """---
-
-          💡 *祝您今天工作顺利！*"""
-
+          msg += "---\n"
+          msg += "💡 *祝您今天工作顺利！*"
 
           print("📝 消息预览:")
-
           print(msg[:300] + "...")
 
-
           # ========== 发送消息 ==========
-
           success_count = 0
-
           for idx, webhook_url in enumerate(webhook_urls, 1):
               try:
                   print(f"📤 发送给群 {idx}...")
@@ -205,5 +168,4 @@ jobs:
                   print(f"   ❌ 异常: {str(e)[:80]}")
 
           print(f"\n🏁 完成! 成功发送: {success_count}/{len(webhook_urls)}")
-
           PYTHON_SCRIPT
