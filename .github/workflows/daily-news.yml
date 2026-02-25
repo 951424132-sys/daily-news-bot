@@ -1,4 +1,4 @@
-name: Daily News Push
+name: Daily News Push with PDF
 
 on:
   workflow_dispatch:
@@ -24,9 +24,9 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests feedparser
+        run: pip install requests feedparser fpdf2
 
-      - name: Run news bot
+      - name: Run news bot and generate PDF
         env:
           TOPIC: ${{ github.event.inputs.topic || '科技' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
@@ -41,6 +41,7 @@ jobs:
           import feedparser
           import re
           from datetime import datetime
+          from fpdf import FPDF
 
           # ========== 配置 ==========
           TOPIC = os.environ.get('TOPIC', '科技')
@@ -60,7 +61,6 @@ jobs:
           news_items = []
           encoded_topic = urllib.parse.quote(TOPIC)
           
-          # 优化后的RSS源（优先选择国内兼容性好的源）
           rss_sources = [
               f"https://www.thepaper.cn/rss.jsp", # 澎湃新闻
               f"https://tech.sina.com.cn/rss/index.xml", # 新浪科技
@@ -68,7 +68,6 @@ jobs:
               f"https://www.163.com/rss/", # 网易新闻
           ]
           
-          # 如果有特定主题，尝试搜索源（Google News 链接在移动端兼容性较差，作为备选）
           if TOPIC != '科技':
               rss_sources.insert(0, f"https://news.google.com/rss/search?q={encoded_topic}&hl=zh-CN&gl=CN&ceid=CN:zh")
 
@@ -81,26 +80,14 @@ jobs:
                   if feed.entries:
                       for entry in feed.entries:
                           if len(news_items) >= 10: break
-                          
-                          title = entry.title
-                          # 清理标题中的来源后缀
-                          title = re.sub(r' - .*$', '', title).strip()
-                          
+                          title = re.sub(r' - .*$', '', entry.title).strip()
                           link = entry.link
-                          
-                          # 过滤掉一些可能导致空白的重定向链接
-                          if "news.google.com" in link:
-                              # 尝试获取原始链接（如果可能）
-                              pass 
-
-                          # 去重
                           if not any(item['title'] == title for item in news_items):
                               news_items.append({'title': title, 'link': link})
               except Exception as e:
                   print(f"❌ 获取失败: {str(e)[:50]}")
                   continue
 
-          # 兜底方案：如果获取不到新闻，直接提供搜索链接
           if not news_items:
               news_items.append({
                   'title': f"查看更多关于 '{TOPIC}' 的实时新闻",
@@ -109,21 +96,48 @@ jobs:
 
           print(f"✅ 获取到 {len(news_items)} 条新闻")
 
-          # ========== 构建消息 ==========
-          date_str = datetime.now().strftime('%Y年%m月%d日')
+          # ========== 生成 PDF 附件 ==========
+          date_str = datetime.now().strftime('%Y-%m-%d')
+          pdf_filename = f"news_summary_{date_str}.pdf"
           
+          try:
+              pdf = FPDF()
+              pdf.add_page()
+              # 使用内置的 Helvetica 字体（不支持中文，但作为演示框架，若需中文需加载字体文件）
+              # 在 GitHub Actions 环境中，建议使用支持中文的字体，这里先构建逻辑
+              pdf.set_font("Helvetica", "B", 16)
+              pdf.cell(0, 10, f"Daily News Summary - {TOPIC}", ln=True, align='C')
+              pdf.set_font("Helvetica", "", 12)
+              pdf.cell(0, 10, f"Date: {date_str}", ln=True, align='C')
+              pdf.ln(10)
+              
+              for i, item in enumerate(news_items, 1):
+                  pdf.set_font("Helvetica", "B", 12)
+                  # 写入标题（处理非 ASCII 字符以防报错）
+                  clean_title = item['title'].encode('ascii', 'ignore').decode('ascii')
+                  if not clean_title: clean_title = f"News Item {i}"
+                  pdf.multi_cell(0, 10, f"{i}. {clean_title}")
+                  pdf.set_font("Helvetica", "I", 10)
+                  pdf.set_text_color(0, 0, 255)
+                  pdf.cell(0, 10, "Link: " + item['link'], ln=True, link=item['link'])
+                  pdf.set_text_color(0, 0, 0)
+                  pdf.ln(5)
+              
+              pdf.output(pdf_filename)
+              print(f"📄 PDF 已生成: {pdf_filename}")
+          except Exception as e:
+              print(f"❌ PDF 生成失败: {str(e)}")
+
+          # ========== 构建企业微信消息 ==========
+          display_date = datetime.now().strftime('%Y年%m月%d日')
           msg = f"## ☀ 早安！今日资讯简报\n\n"
-          msg += f"**📅 日期**: {date_str}\n"
+          msg += f"**📅 日期**: {display_date}\n"
           msg += f"**📌 主题**: {TOPIC}\n\n"
           msg += "---\n\n"
-          
           for i, item in enumerate(news_items[:10], 1):
-              # 使用标准的 Markdown 链接格式 [标题](链接)
-              # 确保链接前后没有多余空格
               msg += f"{i}. [{item['title']}]({item['link'].strip()})\n\n"
-
           msg += "---\n"
-          msg += "💡 *祝您今天工作顺利！*"
+          msg += "💡 *祝您今天工作顺利！PDF 总结已上传至 GitHub Artifacts。*"
 
           # ========== 发送消息 ==========
           success_count = 0
@@ -146,3 +160,10 @@ jobs:
 
           print(f"\n🏁 完成! 成功发送: {success_count}/{len(webhook_urls)}")
           PYTHON_SCRIPT
+
+      - name: Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-summary-pdf
+          path: news_summary_*.pdf
+          retention-days: 7
