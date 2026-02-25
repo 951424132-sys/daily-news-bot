@@ -1,4 +1,4 @@
-name: Daily News Push with PDF
+name: Daily News Push with PDF Link
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests feedparser fpdf2 typing_extensions
 
-      - name: Run news bot and generate PDF
+      - name: Run news bot, generate PDF and upload
         env:
           TOPIC: ${{ github.event.inputs.topic || '科技' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
@@ -105,7 +105,6 @@ jobs:
           try:
               pdf = FPDF()
               pdf.add_page()
-              # 使用内置 Helvetica 字体（仅支持英文，中文会被过滤以防报错）
               pdf.set_font("Helvetica", "B", 16)
               pdf.cell(0, 10, f"Daily News Summary - {TOPIC}", ln=True, align='C')
               pdf.set_font("Helvetica", "", 12)
@@ -114,10 +113,8 @@ jobs:
               
               for i, item in enumerate(news_items, 1):
                   pdf.set_font("Helvetica", "B", 12)
-                  # 过滤非 ASCII 字符以确保 PDF 正常生成（GitHub 环境默认不带中文字体）
                   clean_title = item['title'].encode('ascii', 'ignore').decode('ascii')
-                  if not clean_title.strip(): clean_title = f"News Item {i} (Title contains non-ASCII characters)"
-                  
+                  if not clean_title.strip(): clean_title = f"News Item {i}"
                   pdf.multi_cell(0, 10, f"{i}. {clean_title}")
                   pdf.set_font("Helvetica", "I", 10)
                   pdf.set_text_color(0, 0, 255)
@@ -130,16 +127,36 @@ jobs:
           except Exception as e:
               print(f"❌ PDF 生成失败: {str(e)}")
 
+          # ========== 上传 PDF 到临时云端存储 (transfer.sh) ==========
+          pdf_download_url = ""
+          try:
+              print(f"📤 正在上传 PDF 到临时存储...")
+              with open(pdf_filename, 'rb') as f:
+                  response = requests.put(f'https://transfer.sh/{pdf_filename}', data=f)
+                  if response.status_code == 200:
+                      pdf_download_url = response.text.strip()
+                      print(f"✅ PDF 上传成功: {pdf_download_url}")
+                  else:
+                      print(f"❌ PDF 上传失败，状态码: {response.status_code}")
+          except Exception as e:
+              print(f"❌ PDF 上传异常: {str(e)}")
+
           # ========== 构建企业微信消息 ==========
           display_date = datetime.now().strftime('%Y年%m月%d日')
           msg = f"## ☀ 早安！今日资讯简报\n\n"
           msg += f"**📅 日期**: {display_date}\n"
           msg += f"**📌 主题**: {TOPIC}\n\n"
+          
+          # 如果上传成功，在正文显眼位置加入 PDF 查看链接
+          if pdf_download_url:
+              msg += f"📄 **[点击此处查看/下载 PDF 总结报告]({pdf_download_url})**\n\n"
+          
           msg += "---\n\n"
           for i, item in enumerate(news_items[:10], 1):
               msg += f"{i}. [{item['title']}]({item['link'].strip()})\n\n"
+          
           msg += "---\n"
-          msg += "💡 *祝您今天工作顺利！PDF 总结已上传至 GitHub Artifacts。*"
+          msg += "💡 *祝您今天工作顺利！*"
 
           # ========== 发送消息 ==========
           success_count = 0
@@ -163,7 +180,7 @@ jobs:
           print(f"\n🏁 完成! 成功发送: {success_count}/{len(webhook_urls)}")
           PYTHON_SCRIPT
 
-      - name: Upload PDF Artifact
+      - name: Upload PDF Artifact (Backup)
         uses: actions/upload-artifact@v4
         with:
           name: news-summary-pdf
