@@ -1,23 +1,24 @@
+---
 name: Daily News Push
-
 on:
   workflow_dispatch:
     inputs:
       topic:
-        description: News topic
+        description: 新闻主题
         required: false
         default: AI
-
 jobs:
   fetch-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.10"
       - name: Install dependencies
         run: pip install requests feedparser
       - name: Run news bot
@@ -26,47 +27,183 @@ jobs:
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           WECOM_WEBHOOK_URL1: ${{ secrets.WECOM_WEBHOOK_URL1 }}
           WECOM_WEBHOOK_URL2: ${{ secrets.WECOM_WEBHOOK_URL2 }}
-        run: |
-          python3 - <<'PY'
-          import os, urllib.parse, requests, feedparser
+        run: >
+          python3 - << 'PYTHON_SCRIPT'
+
+          # -*- coding: utf-8 -*-
+
+          import os
+
+          import urllib.parse
+
+          import requests
+
+          import feedparser
+
           from datetime import datetime
 
-          TOPIC = os.environ.get('TOPIC', 'AI')
-          WEBHOOK_URLS = [
+
+          # ========== 配置 ==========
+
+          TOPIC = os.environ.get('TOPIC', '科技')
+
+
+          # 获取所有webhook地址
+
+          webhook_urls = [
               os.environ.get('WECOM_WEBHOOK_URL', ''),
               os.environ.get('WECOM_WEBHOOK_URL2', '')
           ]
-          WEBHOOK_URLS = [url for url in WEBHOOK_URLS if url]
 
-          print(f"TOPIC: {TOPIC}")
-          print(f"Webhooks found: {len(WEBHOOK_URLS)}")
+          webhook_urls = [url for url in webhook_urls if url.strip()]
 
-          url = f"https://news.google.com/rss/search?q={urllib.parse.quote(TOPIC)}+when:1d&hl=zh-CN"
-          feed = feedparser.parse(url)
-          items = []
 
-          for e in feed.entries[:10]:
-              t = e.title.split(' - ')[0] if ' - ' in e.title else e.title
-              items.append({'title': t, 'link': e.link})
+          print(f"📰 主题: {TOPIC}")
 
-          date = datetime.now().strftime('%Y年%m月%d日')
-          msg = f"## ☀ 早安！今日资讯简报\n\n**📅 日期**:{date}\n**📌 主题**:{TOPIC}\n\n"
+          print(f"📡 推送群数: {len(webhook_urls)}")
 
-          for i, item in enumerate(items, 1):
-              msg +=  f"**{i}.** [{item['title']}]({item['link']})\n"
-          msg += "\n---\n💡 *祝您今天工作顺利！*"
 
-          print(f"Items fetched: {len(items)}")
+          # ========== 获取新闻 ==========
 
-          if WEBHOOK_URLS:
-              for i, webhook in enumerate(WEBHOOK_URLS, 1):
-                  print(f"Sending to group {i}...")
-                  r = requests.post(webhook, json={'msgtype': 'markdown', 'markdown': {'content': msg}}, timeout=10)
-                  print(f"Group {i} - Status: {r.status_code}")
-                  if r.status_code == 200:
-                      print(f"Group {i} - Success!")
+          news_items = []
+
+          encoded_topic = urllib.parse.quote(TOPIC)
+
+
+          # 尝试多个RSS源
+
+          rss_sources = [
+              # 科技类
+              f"https://news.google.com/rss/search?q={encoded_topic}&hl=zh-CN&gl=CN&ceid=CN:zh",
+              "https://www.sohu.com/rss/1260.xml",
+              "https://tech.sina.com.cn/rss/index.xml",
+              "https://www.163.com/rss/",
+          ]
+
+
+          for source_url in rss_sources:
+              if len(news_items) >= 10:
+                  break
+              try:
+                  print(f"🔄 尝试: {source_url[:40]}...")
+                  feed = feedparser.parse(source_url)
+                  if feed.entries:
+                      for entry in feed.entries[:15]:
+                          # 清理标题
+                          title = entry.title
+                          if ' - ' in title:
+                              title = title.split(' - ')[0]
+                          title = title.strip()
+                          
+                          # 获取链接
+                          link = entry.link
+                          
+                          # 去重
+                          if not any(item['title'] == title for item in news_items):
+                              news_items.append({
+                                  'title': title,
+                                  'link': link
+                              })
+              except Exception as e:
+                  print(f"❌ 获取失败: {str(e)[:50]}")
+                  continue
+
+          # 如果获取太少，使用备用搜索
+
+          if len(news_items) < 3:
+              print("⚠️ 尝试备用方案...")
+              # 尝试百度新闻
+              try:
+                  baidu_search = f"https://www.baidu.com/s?wd={encoded_topic}&rn=10"
+                  news_items.append({
+                      'title': f'{TOPIC}相关新闻 - 点击查看更多',
+                      'link': baidu_search
+                  })
+              except:
+                  pass
+
+          print(f"✅ 获取到 {len(news_items)} 条新闻")
+
+
+          # ========== 构建消息 ==========
+
+          date_str = datetime.now().strftime('%Y年%m月%d日')
+
+
+          # 消息头部
+
+          msg = f"""## ☀ 早安！今日资讯简报
+
+
+          **📅 日期**: {date_str}
+
+          **📌 主题**: {TOPIC}
+
+
+          ---
+
+
+          """
+
+
+          # 每条新闻（优化移动端链接格式）
+
+          for i, item in enumerate(news_items[:10], 1):
+              # 标题
+              msg += f"**{i}.** {item['title']}\n"
+              # 链接 - 使用可点击格式
+              msg += f"   🔗 链接: {item['link']}\n\n"
+
+          # 消息尾部
+
+          msg += """---
+
+          💡 *祝您今天工作顺利！*"""
+
+
+          print("📝 消息预览:")
+
+          print(msg[:300] + "...")
+
+
+          # ========== 发送消息 ==========
+
+          success_count = 0
+
+          for idx, webhook_url in enumerate(webhook_urls, 1):
+              try:
+                  print(f"📤 发送给群 {idx}...")
+                  
+                  response = requests.post(
+                      webhook_url,
+                      json={
+                          'msgtype': 'markdown',
+                          'markdown': {
+                              'content': msg
+                          }
+                      },
+                      timeout=15,
+                      headers={
+                          'Content-Type': 'application/json',
+                          'Accept': 'application/json'
+                      }
+                  )
+                  
+                  print(f"   状态码: {response.status_code}")
+                  
+                  if response.status_code == 200:
+                      result = response.json()
+                      if result.get('errcode') == 0:
+                          print(f"   ✅ 群 {idx} 发送成功!")
+                          success_count += 1
+                      else:
+                          print(f"   ❌ 错误码: {result.get('errcode')}, 错误信息: {result.get('errmsg', '未知')}")
                   else:
-                      print(f"Group {i} - Failed: {r.text}")
-          else:
-              print("ERROR: No Webhook URLs configured!")
-          PY
+                      print(f"   ❌ HTTP错误: {response.text[:100]}")
+                      
+              except Exception as e:
+                  print(f"   ❌ 异常: {str(e)[:80]}")
+
+          print(f"\n🏁 完成! 成功发送: {success_count}/{len(webhook_urls)}")
+
+          PYTHON_SCRIPT
