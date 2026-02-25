@@ -1,4 +1,4 @@
-name: Daily News Push with News Card
+name: Daily News Push
 
 on:
   workflow_dispatch:
@@ -6,9 +6,7 @@ on:
       topic:
         description: 新闻主题
         required: false
-        default: 科技
-  schedule:
-    - cron: '0 0 * * *' # 每天 UTC 0点（北京时间 8点）自动运行
+        default: AI
 
 jobs:
   fetch-and-push:
@@ -26,15 +24,12 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests feedparser
+        run: pip install requests feedparser
 
-      - name: Run news bot and push card
+      - name: Run news bot
         env:
-          TOPIC: ${{ github.event.inputs.topic || '科技' }}
+          TOPIC: ${{ github.event.inputs.topic || 'AI' }}
           WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
-          WECOM_WEBHOOK_URL1: ${{ secrets.WECOM_WEBHOOK_URL1 }}
           WECOM_WEBHOOK_URL2: ${{ secrets.WECOM_WEBHOOK_URL2 }}
         run: |
           python3 - << 'PYTHON_SCRIPT'
@@ -47,90 +42,105 @@ jobs:
           from datetime import datetime
 
           # ========== 配置 ==========
-          TOPIC = os.environ.get('TOPIC', '科技')
+          TOPIC = os.environ.get('TOPIC', 'AI')
           
+          # 获取所有webhook地址
           webhook_urls = [
               os.environ.get('WECOM_WEBHOOK_URL', ''),
-              os.environ.get('WECOM_WEBHOOK_URL1', ''),
               os.environ.get('WECOM_WEBHOOK_URL2', '')
           ]
           webhook_urls = [url for url in webhook_urls if url.strip()]
+          
+          print(f"📰 主题: {TOPIC}")
+          print(f"📡 推送群数: {len(webhook_urls)}")
 
           # ========== 获取新闻 ==========
           news_items = []
           encoded_topic = urllib.parse.quote(TOPIC)
+          
+          # 优化后的RSS源（优先选择国内兼容性好的源）
           rss_sources = [
-              f"https://www.thepaper.cn/rss.jsp",
-              f"https://tech.sina.com.cn/rss/index.xml",
-              f"https://news.sohu.com/rss/scroll.xml",
-              f"https://www.163.com/rss/",
+              f"https://www.thepaper.cn/rss.jsp", # 澎湃新闻
+              f"https://tech.sina.com.cn/rss/index.xml", # 新浪科技
+              f"https://news.sohu.com/rss/scroll.xml", # 搜狐新闻
+              f"https://www.163.com/rss/", # 网易新闻
           ]
-          if TOPIC != '科技':
+          
+          # 如果有特定主题，尝试搜索源（Google News 链接在移动端兼容性较差，作为备选）
+          if TOPIC != 'AI':
               rss_sources.insert(0, f"https://news.google.com/rss/search?q={encoded_topic}&hl=zh-CN&gl=CN&ceid=CN:zh")
 
           for source_url in rss_sources:
-              if len(news_items) >= 8: break # 企业微信图文卡片最多支持8条
+              if len(news_items) >= 10:
+                  break
               try:
+                  print(f"🔄 尝试: {source_url[:40]}...")
                   feed = feedparser.parse(source_url)
-                  for entry in feed.entries:
-                      if len(news_items) >= 8: break
-                      title = re.sub(r' - .*$', '', entry.title).strip()
-                      link = entry.link
-                      # 尝试获取描述作为摘要
-                      description = re.sub(r'<[^>]+>', '', entry.get('summary', '')).strip()[:50]
-                      if not description: description = f"点击查看关于 {TOPIC} 的最新报道"
-                      
-                      if not any(item['title'] == title for item in news_items):
-                          news_items.append({
-                              'title': title, 
-                              'url': link,
-                              'description': description,
-                              'picurl': "https://img.icons8.com/color/96/news.png" # 默认图标
-                          })
-              except: continue
+                  if feed.entries:
+                      for entry in feed.entries:
+                          if len(news_items) >= 10: break
+                          
+                          title = entry.title
+                          # 清理标题中的来源后缀
+                          title = re.sub(r' - .*$', '', title).strip()
+                          
+                          link = entry.link
+                          
+                          # 过滤掉一些可能导致空白的重定向链接
+                          if "news.google.com" in link:
+                              # 尝试获取原始链接（如果可能）
+                              pass 
 
+                          # 去重
+                          if not any(item['title'] == title for item in news_items):
+                              news_items.append({'title': title, 'link': link})
+              except Exception as e:
+                  print(f"❌ 获取失败: {str(e)[:50]}")
+                  continue
+
+          # 兜底方案：如果获取不到新闻，直接提供搜索链接
           if not news_items:
               news_items.append({
                   'title': f"查看更多关于 '{TOPIC}' 的实时新闻",
-                  'url': f"https://www.baidu.com/s?wd={encoded_topic}",
-                  'description': "点击进入搜索页面查看更多内容",
-                  'picurl': "https://img.icons8.com/color/96/search.png"
+                  'link': f"https://www.baidu.com/s?wd={encoded_topic}"
               })
 
-          # ========== 构建图文卡片消息 (news) ==========
-          # 企业微信图文消息格式：https://developer.work.weixin.qq.com/document/path/91770#图文类型
-          articles = []
-          date_display = datetime.now().strftime('%Y年%m月%d日')
-          
-          # 第一条作为封面大图
-          first_item = news_items[0]
-          articles.append({
-              "title": f"📰 {TOPIC}资讯简报 | {date_display}",
-              "description": first_item['title'],
-              "url": first_item['url'],
-              "picurl": "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80" # 封面大图
-          })
-          
-          # 后续条目作为列表
-          for item in news_items[1:8]:
-              articles.append({
-                  "title": item['title'],
-                  "url": item['url'],
-                  "picurl": "https://img.icons8.com/color/48/news.png"
-              })
+          print(f"✅ 获取到 {len(news_items)} 条新闻")
 
-          payload = {
-              "msgtype": "news",
-              "news": {
-                 "articles": articles
-              }
-          }
+          # ========== 构建消息 ==========
+          date_str = datetime.now().strftime('%Y年%m月%d日')
+          
+          msg = f"## ☀ 早安！今日资讯简报\n\n"
+          msg += f"**📅 日期**: {date_str}\n"
+          msg += f"**📌 主题**: {TOPIC}\n\n"
+          msg += "---\n\n"
+          
+          for i, item in enumerate(news_items[:10], 1):
+              # 使用标准的 Markdown 链接格式 [标题](链接)
+              # 确保链接前后没有多余空格
+              msg += f"{i}. [{item['title']}]({item['link'].strip()})\n\n"
+
+          msg += "---\n"
+          msg += "💡 *祝您今天工作顺利！*"
 
           # ========== 发送消息 ==========
+          success_count = 0
           for idx, webhook_url in enumerate(webhook_urls, 1):
               try:
-                  response = requests.post(webhook_url, json=payload, timeout=15)
-                  print(f"✅ 群 {idx} 消息已发送，状态码: {response.status_code}")
+                  print(f"📤 发送给群 {idx}...")
+                  response = requests.post(
+                      webhook_url,
+                      json={'msgtype': 'markdown', 'markdown': {'content': msg}},
+                      timeout=15,
+                      headers={'Content-Type': 'application/json'}
+                  )
+                  if response.status_code == 200 and response.json().get('errcode') == 0:
+                      print(f"   ✅ 群 {idx} 发送成功!")
+                      success_count += 1
+                  else:
+                      print(f"   ❌ 发送失败: {response.text[:100]}")
               except Exception as e:
-                  print(f"❌ 群 {idx} 发送失败: {str(e)}")
+                  print(f"   ❌ 异常: {str(e)[:80]}")
+
+          print(f"\n🏁 完成! 成功发送: {success_count}/{len(webhook_urls)}")
           PYTHON_SCRIPT
