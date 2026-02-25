@@ -53,7 +53,7 @@ jobs:
           msg = f"## ☀ 早安！今日资讯简报\n\n**📅 日期**:{date}\n**📌 主题**:{TOPIC}\n\n"
 
           for i, item in enumerate(items, 1):
-              msg += f"**{i}.** {item['title']}\n   链接: {item['link']}\n"
+              msg +=  f"**{i}.** [{item['title']}]({item['link']})\n"
           msg += "\n---\n💡 *祝您今天工作顺利！*"
 
           print(f"Items fetched: {len(items)}")
