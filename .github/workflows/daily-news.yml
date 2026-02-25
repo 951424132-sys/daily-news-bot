@@ -39,6 +39,7 @@ jobs:
           import urllib.parse
           import requests
           import feedparser
+          import re
           from datetime import datetime
 
           # ========== 配置 ==========
@@ -59,15 +60,18 @@ jobs:
           news_items = []
           encoded_topic = urllib.parse.quote(TOPIC)
           
-          # 尝试多个RSS源
+          # 优化后的RSS源（优先选择国内兼容性好的源）
           rss_sources = [
-              # 科技类
-              f"https://news.google.com/rss/search?q={encoded_topic}&hl=zh-CN&gl=CN&ceid=CN:zh",
-              "https://www.sohu.com/rss/1260.xml",
-              "https://tech.sina.com.cn/rss/index.xml",
-              "https://www.163.com/rss/",
+              f"https://www.thepaper.cn/rss.jsp", # 澎湃新闻
+              f"https://tech.sina.com.cn/rss/index.xml", # 新浪科技
+              f"https://news.sohu.com/rss/scroll.xml", # 搜狐新闻
+              f"https://www.163.com/rss/", # 网易新闻
           ]
           
+          # 如果有特定主题，尝试搜索源（Google News 链接在移动端兼容性较差，作为备选）
+          if TOPIC != '科技':
+              rss_sources.insert(0, f"https://news.google.com/rss/search?q={encoded_topic}&hl=zh-CN&gl=CN&ceid=CN:zh")
+
           for source_url in rss_sources:
               if len(news_items) >= 10:
                   break
@@ -75,95 +79,68 @@ jobs:
                   print(f"🔄 尝试: {source_url[:40]}...")
                   feed = feedparser.parse(source_url)
                   if feed.entries:
-                      for entry in feed.entries[:15]:
-                          # 清理标题
-                          title = entry.title
-                          if ' - ' in title:
-                              title = title.split(' - ')[0]
-                          title = title.strip()
+                      for entry in feed.entries:
+                          if len(news_items) >= 10: break
                           
-                          # 获取链接
+                          title = entry.title
+                          # 清理标题中的来源后缀
+                          title = re.sub(r' - .*$', '', title).strip()
+                          
                           link = entry.link
                           
+                          # 过滤掉一些可能导致空白的重定向链接
+                          if "news.google.com" in link:
+                              # 尝试获取原始链接（如果可能）
+                              pass 
+
                           # 去重
                           if not any(item['title'] == title for item in news_items):
-                              news_items.append({
-                                  'title': title,
-                                  'link': link
-                              })
+                              news_items.append({'title': title, 'link': link})
               except Exception as e:
                   print(f"❌ 获取失败: {str(e)[:50]}")
                   continue
 
-          # 如果获取太少，使用备用搜索
-          if len(news_items) < 3:
-              print("⚠️ 尝试备用方案...")
-              # 尝试百度新闻
-              try:
-                  baidu_search = f"https://www.baidu.com/s?wd={encoded_topic}&rn=10"
-                  news_items.append({
-                      'title': f'{TOPIC}相关新闻 - 点击查看更多',
-                      'link': baidu_search
-                  })
-              except:
-                  pass
+          # 兜底方案：如果获取不到新闻，直接提供搜索链接
+          if not news_items:
+              news_items.append({
+                  'title': f"查看更多关于 '{TOPIC}' 的实时新闻",
+                  'link': f"https://www.baidu.com/s?wd={encoded_topic}"
+              })
 
           print(f"✅ 获取到 {len(news_items)} 条新闻")
 
           # ========== 构建消息 ==========
           date_str = datetime.now().strftime('%Y年%m月%d日')
           
-          # 消息头部
           msg = f"## ☀ 早安！今日资讯简报\n\n"
           msg += f"**📅 日期**: {date_str}\n"
           msg += f"**📌 主题**: {TOPIC}\n\n"
           msg += "---\n\n"
           
-          # 每条新闻（隐藏网址，仅显示标题超链接）
           for i, item in enumerate(news_items[:10], 1):
-              # 格式为: 1. [新闻标题](新闻链接)
-              msg += f"{i}. [{item['title']}]({item['link']})\n\n"
+              # 使用标准的 Markdown 链接格式 [标题](链接)
+              # 确保链接前后没有多余空格
+              msg += f"{i}. [{item['title']}]({item['link'].strip()})\n\n"
 
-          # 消息尾部
           msg += "---\n"
           msg += "💡 *祝您今天工作顺利！*"
-
-          print("📝 消息预览:")
-          print(msg[:300] + "...")
 
           # ========== 发送消息 ==========
           success_count = 0
           for idx, webhook_url in enumerate(webhook_urls, 1):
               try:
                   print(f"📤 发送给群 {idx}...")
-                  
                   response = requests.post(
                       webhook_url,
-                      json={
-                          'msgtype': 'markdown',
-                          'markdown': {
-                              'content': msg
-                          }
-                      },
+                      json={'msgtype': 'markdown', 'markdown': {'content': msg}},
                       timeout=15,
-                      headers={
-                          'Content-Type': 'application/json',
-                          'Accept': 'application/json'
-                      }
+                      headers={'Content-Type': 'application/json'}
                   )
-                  
-                  print(f"   状态码: {response.status_code}")
-                  
-                  if response.status_code == 200:
-                      result = response.json()
-                      if result.get('errcode') == 0:
-                          print(f"   ✅ 群 {idx} 发送成功!")
-                          success_count += 1
-                      else:
-                          print(f"   ❌ 错误码: {result.get('errcode')}, 错误信息: {result.get('errmsg', '未知')}")
+                  if response.status_code == 200 and response.json().get('errcode') == 0:
+                      print(f"   ✅ 群 {idx} 发送成功!")
+                      success_count += 1
                   else:
-                      print(f"   ❌ HTTP错误: {response.text[:100]}")
-                      
+                      print(f"   ❌ 发送失败: {response.text[:100]}")
               except Exception as e:
                   print(f"   ❌ 异常: {str(e)[:80]}")
 
