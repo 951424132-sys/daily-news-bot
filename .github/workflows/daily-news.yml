@@ -1,4 +1,4 @@
-name: Daily News Push with PDF Link
+name: Daily News Push with Stable PDF Link
 
 on:
   workflow_dispatch:
@@ -42,6 +42,7 @@ jobs:
           import requests
           import feedparser
           import re
+          import json
           from datetime import datetime
           from fpdf import FPDF
 
@@ -127,15 +128,20 @@ jobs:
           except Exception as e:
               print(f"❌ PDF 生成失败: {str(e)}")
 
-          # ========== 上传 PDF 到临时云端存储 (transfer.sh) ==========
+          # ========== 上传 PDF 到临时云端存储 (file.io) ==========
           pdf_download_url = ""
           try:
-              print(f"📤 正在上传 PDF 到临时存储...")
+              print(f"📤 正在上传 PDF 到 file.io...")
               with open(pdf_filename, 'rb') as f:
-                  response = requests.put(f'https://transfer.sh/{pdf_filename}', data=f)
+                  # file.io 默认有效期 14 天，上传成功率极高
+                  response = requests.post('https://file.io', files={'file': f}, data={'expires': '14d'})
                   if response.status_code == 200:
-                      pdf_download_url = response.text.strip()
-                      print(f"✅ PDF 上传成功: {pdf_download_url}")
+                      result = response.json()
+                      if result.get('success'):
+                          pdf_download_url = result.get('link')
+                          print(f"✅ PDF 上传成功: {pdf_download_url}")
+                      else:
+                          print(f"❌ file.io 返回失败: {result.get('message')}")
                   else:
                       print(f"❌ PDF 上传失败，状态码: {response.status_code}")
           except Exception as e:
@@ -147,9 +153,11 @@ jobs:
           msg += f"**📅 日期**: {display_date}\n"
           msg += f"**📌 主题**: {TOPIC}\n\n"
           
-          # 如果上传成功，在正文显眼位置加入 PDF 查看链接
+          # 显眼位置加入 PDF 查看链接
           if pdf_download_url:
               msg += f"📄 **[点击此处查看/下载 PDF 总结报告]({pdf_download_url})**\n\n"
+          else:
+              msg += f"⚠️ *PDF 总结上传失败，请在 GitHub Artifacts 中查看备份。*\n\n"
           
           msg += "---\n\n"
           for i, item in enumerate(news_items[:10], 1):
