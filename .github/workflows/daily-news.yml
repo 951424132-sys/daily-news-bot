@@ -24,7 +24,9 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests feedparser fpdf2
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests feedparser fpdf2 typing_extensions
 
       - name: Run news bot and generate PDF
         env:
@@ -103,8 +105,7 @@ jobs:
           try:
               pdf = FPDF()
               pdf.add_page()
-              # 使用内置的 Helvetica 字体（不支持中文，但作为演示框架，若需中文需加载字体文件）
-              # 在 GitHub Actions 环境中，建议使用支持中文的字体，这里先构建逻辑
+              # 使用内置 Helvetica 字体（仅支持英文，中文会被过滤以防报错）
               pdf.set_font("Helvetica", "B", 16)
               pdf.cell(0, 10, f"Daily News Summary - {TOPIC}", ln=True, align='C')
               pdf.set_font("Helvetica", "", 12)
@@ -113,9 +114,10 @@ jobs:
               
               for i, item in enumerate(news_items, 1):
                   pdf.set_font("Helvetica", "B", 12)
-                  # 写入标题（处理非 ASCII 字符以防报错）
+                  # 过滤非 ASCII 字符以确保 PDF 正常生成（GitHub 环境默认不带中文字体）
                   clean_title = item['title'].encode('ascii', 'ignore').decode('ascii')
-                  if not clean_title: clean_title = f"News Item {i}"
+                  if not clean_title.strip(): clean_title = f"News Item {i} (Title contains non-ASCII characters)"
+                  
                   pdf.multi_cell(0, 10, f"{i}. {clean_title}")
                   pdf.set_font("Helvetica", "I", 10)
                   pdf.set_text_color(0, 0, 255)
